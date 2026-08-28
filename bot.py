@@ -1308,9 +1308,9 @@ async def setup(interaction: discord.Interaction):
             f"{EMO['bronze1']}{EMO['bronze2']}{EMO['bronze3']}"
             f"{EMO['silver1']}{EMO['silver2']}{EMO['silver3']}\n"
             "```\n"
-            "Fer 1    → Bronze 3    ...\n"
-            "Bronze 1 → Argent 3    ...\n"
-            "Argent 1 → Or 1        ...\n"
+            "Fer 1    → Bronze 1    15e\n"
+            "Bronze 1 → Argent 1    18e\n"
+            "Argent 1 → Or 1        24e\n"
             "```"
         ),
         inline=False,
@@ -1322,9 +1322,9 @@ async def setup(interaction: discord.Interaction):
             f"{EMO['plat1']}{EMO['plat2']}{EMO['plat3']}"
             f"{EMO['dia1']}{EMO['dia2']}{EMO['dia3']}\n"
             "```\n"
-            "Or 1      → Platine 1   ...\n"
-            "Platine 1 → Diamant 1   ...\n"
-            "Diamant 1 → Ascendant 1 ...\n"
+            "Or 1      → Platine 1   36e\n"
+            "Platine 1 → Diamant 1   54e\n"
+            "Diamant 1 → Ascendant 1 72e\n"
             "```"
         ),
         inline=False,
@@ -1335,8 +1335,8 @@ async def setup(interaction: discord.Interaction):
             f"{EMO['asc1']}{EMO['asc2']}{EMO['asc3']}"
             f"{EMO['immo1']}{EMO['immo2']}{EMO['immo3']}{EMO['radiant']}\n"
             "```\n"
-            "Ascendant 1 → Immortel 1  ...\n"
-            "Immortel 1  → Immortel 3  ...\n"
+            "Ascendant 1 → Immortel 1  90e\n"
+            "Immortel 1  → Immortel 3  90e\n"
             "Immortel 3  → Radiant     sur devis\n"
             "```"
         ),
@@ -1385,9 +1385,9 @@ async def setup(interaction: discord.Interaction):
             f"{EMO['bronze1']}{EMO['bronze2']}{EMO['bronze3']}"
             f"{EMO['silver1']}{EMO['silver2']}{EMO['silver3']}\n"
             "```\n"
-            "Iron 1   → Bronze 3   ...\n"
-            "Bronze 1 → Silver 3   ...\n"
-            "Silver 1 → Gold 1     ...\n"
+            "Iron 1   → Bronze 1   17,5usd\n"
+            "Bronze 1 → Silver 1   20,5usd\n"
+            "Silver 1 → Gold 1     27,5usd\n"
             "```"
         ),
         inline=False,
@@ -1399,9 +1399,9 @@ async def setup(interaction: discord.Interaction):
             f"{EMO['plat1']}{EMO['plat2']}{EMO['plat3']}"
             f"{EMO['dia1']}{EMO['dia2']}{EMO['dia3']}\n"
             "```\n"
-            "Gold 1     → Platinum 1  ...\n"
-            "Platinum 1 → Diamond 1   ...\n"
-            "Diamond 1  → Ascendant 1 ...\n"
+            "Gold 1     → Platinum 1  41,5usd\n"
+            "Platinum 1 → Diamond 1   62,5usd\n"
+            "Diamond 1  → Ascendant 1 83,5usd\n"
             "```"
         ),
         inline=False,
@@ -1412,8 +1412,8 @@ async def setup(interaction: discord.Interaction):
             f"{EMO['asc1']}{EMO['asc2']}{EMO['asc3']}"
             f"{EMO['immo1']}{EMO['immo2']}{EMO['immo3']}{EMO['radiant']}\n"
             "```\n"
-            "Ascendant 1 → Immortal 1  ...\n"
-            "Immortal 1  → Immortal 3  ...\n"
+            "Ascendant 1 → Immortal 1  104usd\n"
+            "Immortal 1  → Immortal 3  104usd\n"
             "Immortal 3  → Radiant     on request\n"
             "```"
         ),
