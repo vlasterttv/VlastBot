@@ -761,8 +761,15 @@ async def _create_ticket(interaction: discord.Interaction, kind: str, lang: str)
         text=(f"Ouvert par {member}" if is_fr else f"Opened by {member}"),
         icon_url=member.display_avatar.url,
     )
+    if guild.icon:
+        embed.set_thumbnail(url=guild.icon.url)
 
-    ping = role_admin.mention if role_admin else ""
+    pings = []
+    if role_admin:
+        pings.append(role_admin.mention)
+    if role_booster and kind == "boost":
+        pings.append(role_booster.mention)
+    ping = " ".join(pings)
     await channel.send(
         content=f"{member.mention} {ping}",
         embed=embed,
@@ -843,8 +850,9 @@ class TicketControlView(discord.ui.View):
         custom_id="persistent:ticket_claim",
     )
     async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
-        role_admin = get_role(interaction.guild, R_ADMIN)
-        role_booster = get_role(interaction.guild, R_BOOSTER)
+        guild = interaction.guild
+        role_admin = get_role(guild, R_ADMIN)
+        role_booster = get_role(guild, R_BOOSTER)
         allowed = {r for r in (role_admin, role_booster) if r}
 
         if not allowed & set(interaction.user.roles):
@@ -852,11 +860,50 @@ class TicketControlView(discord.ui.View):
                 "⛔ Réservé au staff et aux boosters.", ephemeral=True
             )
 
+        await interaction.response.defer()
+
+        # --- Verrouillage : seul le booster qui claim garde l'accès ---
+        try:
+            if role_booster:
+                await interaction.channel.set_permissions(
+                    role_booster,
+                    overwrite=discord.PermissionOverwrite(view_channel=False),
+                    reason=f"Ticket claim par {interaction.user}",
+                )
+            await interaction.channel.set_permissions(
+                interaction.user,
+                overwrite=discord.PermissionOverwrite(
+                    view_channel=True, send_messages=True,
+                    read_message_history=True, attach_files=True, embed_links=True,
+                ),
+                reason=f"Ticket claim par {interaction.user}",
+            )
+        except discord.Forbidden:
+            return await interaction.followup.send(
+                "⚠️ Permissions insuffisantes pour verrouiller le ticket.", ephemeral=True
+            )
+
         button.disabled = True
         button.label = f"Pris en charge par {interaction.user.display_name}"
-        await interaction.response.edit_message(view=self)
+        await interaction.message.edit(view=self)
+
         await interaction.channel.send(
-            f"🙋 {interaction.user.mention} prend ce ticket en charge."
+            embed=discord.Embed(
+                description=(
+                    f"🙋 {interaction.user.mention} prend ce ticket en charge.\n"
+                    "Le salon est désormais réservé à ce booster et au staff."
+                ),
+                colour=C_BOOSTER,
+            )
+        )
+
+        await log_event(
+            guild,
+            discord.Embed(
+                title="🙋 Ticket pris en charge",
+                description=f"{interaction.channel.mention} par {interaction.user.mention}",
+                colour=C_BOOSTER,
+            ),
         )
 
     @discord.ui.button(
@@ -872,7 +919,6 @@ class TicketControlView(discord.ui.View):
                 colour=C_BOOSTER,
             ),
             view=ConfirmCloseView(interaction.user),
-            ephemeral=False,
         )
 
 
@@ -1099,9 +1145,20 @@ async def setup(interaction: discord.Interaction):
         await asyncio.sleep(0.3)
         return cat
 
+    async def purge_bot_messages(channel):
+        """Supprime les anciens messages du bot pour éviter les doublons."""
+        try:
+            async for msg in channel.history(limit=50):
+                if msg.author.id == guild.me.id:
+                    await msg.delete()
+                    await asyncio.sleep(0.4)
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
     async def make_text(category, name, overwrites, topic=None):
         existing = discord.utils.get(guild.text_channels, name=name.lower())
         if existing:
+            await purge_bot_messages(existing)
             return existing
         ch = await guild.create_text_channel(
             name, category=category, overwrites=overwrites, topic=topic, reason="Setup"
@@ -1191,6 +1248,8 @@ async def setup(interaction: discord.Interaction):
         ),
         colour=C_MEMBRE,
     )
+    if guild.icon:
+        e.set_thumbnail(url=guild.icon.url)
     e.set_footer(text="Protection anti-raid active • Anti-raid protection enabled")
     await ch_verif.send(embed=e, view=VerifyView())
 
@@ -1250,6 +1309,8 @@ async def setup(interaction: discord.Interaction):
     e.add_field(name="4️⃣  Méfie-toi des usurpateurs", value="Le staff ne te contactera **jamais en premier** en MP pour te réclamer un paiement.", inline=False)
     e.add_field(name="5️⃣  Litiges", value="Un désaccord se règle dans le ticket concerné, calmement, avec le staff. Pas en public.", inline=False)
     e.add_field(name="6️⃣  CGU Discord", value="Les [Conditions d'utilisation](https://discord.com/terms) s'appliquent. 13 ans minimum.", inline=False)
+    if guild.icon:
+        e.set_thumbnail(url=guild.icon.url)
     await ch_rules_fr.send(embed=e)
 
     # --- Rules EN ---
@@ -1264,10 +1325,12 @@ async def setup(interaction: discord.Interaction):
     e.add_field(name="4️⃣  Beware of impersonators", value="Staff will **never DM you first** asking for a payment. Always check the person's role.", inline=False)
     e.add_field(name="5️⃣  Disputes", value="Disagreements are settled inside the relevant ticket, calmly, with staff. Not in public.", inline=False)
     e.add_field(name="6️⃣  Discord ToS", value="Discord's [Terms of Service](https://discord.com/terms) apply. 13+ only.", inline=False)
+    if guild.icon:
+        e.set_thumbnail(url=guild.icon.url)
     await ch_rules_en.send(embed=e)
 
     # --- Vouches FR / EN ---
-    await ch_vouch_fr.send(embed=discord.Embed(
+    e = discord.Embed(
         title="⭐  VOUCHES & RETOURS CLIENTS",
         description=(
             "Ce salon regroupe les retours de nos clients.\n\n"
@@ -1277,8 +1340,11 @@ async def setup(interaction: discord.Interaction):
             "🚫 Tout faux vouch entraîne un bannissement définitif."
         ),
         colour=C_CLIENT,
-    ))
-    await ch_vouch_en.send(embed=discord.Embed(
+    )
+    if guild.icon:
+        e.set_thumbnail(url=guild.icon.url)
+    await ch_vouch_fr.send(embed=e)
+    e = discord.Embed(
         title="⭐  VOUCHES & CUSTOMER FEEDBACK",
         description=(
             "This channel collects feedback from our customers.\n\n"
@@ -1288,7 +1354,10 @@ async def setup(interaction: discord.Interaction):
             "🚫 Any fake vouch results in a permanent ban."
         ),
         colour=C_CLIENT,
-    ))
+    )
+    if guild.icon:
+        e.set_thumbnail(url=guild.icon.url)
+    await ch_vouch_en.send(embed=e)
 
     # --- Tarification FR ---
     e = discord.Embed(
@@ -1495,7 +1564,7 @@ async def setup(interaction: discord.Interaction):
     await ch_open_en.send(embed=e, view=TicketPanelViewEN())
 
     # --- Staff chat ---
-    await ch_staff.send(embed=discord.Embed(
+    e = discord.Embed(
         title="🔒  Salon staff",
         description=(
             "Coordination interne uniquement.\n\n"
@@ -1509,7 +1578,10 @@ async def setup(interaction: discord.Interaction):
             "`/add @membre` — ajoute quelqu'un au ticket courant"
         ),
         colour=C_ADMIN,
-    ))
+    )
+    if guild.icon:
+        e.set_thumbnail(url=guild.icon.url)
+    await ch_staff.send(embed=e)
 
     await interaction.followup.send(
         "✅ **Serveur construit.**\n\n"
