@@ -21,6 +21,8 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
+import aiohttp
+
 # ======================================================================
 #  CONFIGURATION
 # ======================================================================
@@ -49,6 +51,23 @@ RAID_JOIN_WINDOW = 20        # ...en Y secondes = lockdown
 LOCKDOWN_DURATION = 300      # Durée du lockdown en secondes
 
 DATA_FILE = "bot_data.json"
+
+# --- Paiements crypto (vérification manuelle assistée) -----------------
+# Remplace ces adresses par les tiennes. Laisse vide "" pour désactiver
+# une devise (la commande /request_payment ne la proposera plus).
+WALLETS = {
+    "BTC": "",              # ex: bc1qxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    "ETH": "",               # ex: 0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    "USDT_ERC20": "",        # même adresse ETH en général, mais séparée au cas où
+}
+
+ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "")
+USDT_CONTRACT = "0xdac17f958d2ee523a2206206994597c13d831ec"
+TRANSFER_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
+PAYMENT_TOLERANCE = 0.01        # 1% de marge (frais réseau, arrondis)
+MIN_CONFIRMATIONS_BTC = 1
+MIN_CONFIRMATIONS_ETH = 3
 
 # ======================================================================
 #  PERSISTANCE (compteur de tickets, salons de logs)
@@ -92,6 +111,8 @@ class BoostBot(commands.Bot):
         self.add_view(VerifyView())
         self.add_view(TicketPanelView())
         self.add_view(TicketControlView())
+        self.add_view(PaymentRequestView())
+        self.add_view(PaymentConfirmView())
         await self.tree.sync()
         print("→ Commandes slash synchronisées.")
 
@@ -219,6 +240,305 @@ class VerifyView(discord.ui.View):
                 description=f"{member.mention} • `{member}`\nCompte créé il y a **{age.days} jours**.",
                 colour=C_MEMBRE,
             ),
+        )
+
+
+# ======================================================================
+#  VÉRIFICATION DE PAIEMENT CRYPTO
+# ======================================================================
+
+
+def extract_txid(raw: str) -> str:
+    """Nettoie un lien d'explorateur pour n'en garder que le hash de tx."""
+    raw = raw.strip()
+    if "/" in raw:
+        raw = raw.rstrip("/").split("/")[-1]
+    return raw.split("?")[0]
+
+
+async def check_btc_tx(txid: str, expected_amount: float, wallet: str) -> dict:
+    """Vérifie une transaction Bitcoin via l'API publique Blockstream."""
+    async with aiohttp.ClientSession() as session:
+        async with session.get(f"https://blockstream.info/api/tx/{txid}") as r:
+            if r.status != 200:
+                return {"ok": False, "reason": "Transaction introuvable. Vérifie le lien."}
+            tx = await r.json()
+
+        received = sum(
+            vout["value"] for vout in tx.get("vout", [])
+            if vout.get("scriptpubkey_address") == wallet
+        ) / 1e8
+
+        confirmations = 0
+        if tx.get("status", {}).get("confirmed"):
+            async with session.get("https://blockstream.info/api/blocks/tip/height") as r2:
+                tip = await r2.json()
+            confirmations = tip - tx["status"]["block_height"] + 1
+
+    if received == 0:
+        return {"ok": False, "reason": "Aucun montant envoyé à l'adresse attendue dans cette transaction."}
+
+    if received < expected_amount * (1 - PAYMENT_TOLERANCE):
+        return {
+            "ok": False,
+            "reason": f"Montant insuffisant : reçu **{received:.8f} BTC**, attendu **{expected_amount:.8f} BTC**.",
+        }
+
+    if confirmations < MIN_CONFIRMATIONS_BTC:
+        return {
+            "ok": False,
+            "pending": True,
+            "reason": f"Transaction détectée mais non confirmée ({confirmations} confirmation(s)). Réessaie dans quelques minutes.",
+        }
+
+    return {"ok": True, "amount": received, "confirmations": confirmations}
+
+
+async def check_eth_tx(txid: str, expected_amount: float, wallet: str) -> dict:
+    """Vérifie une transaction Ethereum native (ETH) via l'API Etherscan."""
+    if not ETHERSCAN_API_KEY:
+        return {"ok": False, "reason": "Vérification ETH indisponible : clé Etherscan non configurée."}
+
+    base = "https://api.etherscan.io/api"
+    async with aiohttp.ClientSession() as session:
+        params = {
+            "module": "proxy", "action": "eth_getTransactionByHash",
+            "txhash": txid, "apikey": ETHERSCAN_API_KEY,
+        }
+        async with session.get(base, params=params) as r:
+            data = await r.json()
+        tx = data.get("result")
+        if not tx:
+            return {"ok": False, "reason": "Transaction introuvable. Vérifie le lien."}
+
+        if (tx.get("to") or "").lower() != wallet.lower():
+            return {"ok": False, "reason": "Cette transaction ne va pas vers l'adresse attendue."}
+
+        received = int(tx["value"], 16) / 1e18
+
+        async with session.get(base, params={
+            "module": "proxy", "action": "eth_blockNumber", "apikey": ETHERSCAN_API_KEY
+        }) as r2:
+            current_block = int((await r2.json())["result"], 16)
+        tx_block = int(tx["blockNumber"], 16) if tx.get("blockNumber") else None
+        confirmations = (current_block - tx_block) if tx_block else 0
+
+    if received < expected_amount * (1 - PAYMENT_TOLERANCE):
+        return {
+            "ok": False,
+            "reason": f"Montant insuffisant : reçu **{received:.6f} ETH**, attendu **{expected_amount:.6f} ETH**.",
+        }
+
+    if confirmations < MIN_CONFIRMATIONS_ETH:
+        return {
+            "ok": False,
+            "pending": True,
+            "reason": f"Transaction détectée mais peu confirmée ({confirmations} bloc(s)). Réessaie dans quelques minutes.",
+        }
+
+    return {"ok": True, "amount": received, "confirmations": confirmations}
+
+
+async def check_usdt_tx(txid: str, expected_amount: float, wallet: str) -> dict:
+    """Vérifie un transfert de token USDT (ERC-20) via les logs de la transaction."""
+    if not ETHERSCAN_API_KEY:
+        return {"ok": False, "reason": "Vérification USDT indisponible : clé Etherscan non configurée."}
+
+    base = "https://api.etherscan.io/api"
+    async with aiohttp.ClientSession() as session:
+        params = {
+            "module": "proxy", "action": "eth_getTransactionReceipt",
+            "txhash": txid, "apikey": ETHERSCAN_API_KEY,
+        }
+        async with session.get(base, params=params) as r:
+            data = await r.json()
+        receipt = data.get("result")
+        if not receipt:
+            return {"ok": False, "reason": "Transaction introuvable. Vérifie le lien."}
+
+        received = 0.0
+        found_wallet = False
+        for log in receipt.get("logs", []):
+            if log.get("address", "").lower() != USDT_CONTRACT:
+                continue
+            topics = log.get("topics", [])
+            if len(topics) < 3 or topics[0].lower() != TRANSFER_TOPIC:
+                continue
+            to_addr = "0x" + topics[2][-40:]
+            if to_addr.lower() != wallet.lower():
+                continue
+            found_wallet = True
+            received += int(log["data"], 16) / 1e6  # USDT = 6 décimales
+
+        if not found_wallet:
+            return {"ok": False, "reason": "Aucun transfert USDT vers l'adresse attendue dans cette transaction."}
+
+        status_ok = receipt.get("status") == "0x1"
+        async with session.get(base, params={
+            "module": "proxy", "action": "eth_blockNumber", "apikey": ETHERSCAN_API_KEY
+        }) as r2:
+            current_block = int((await r2.json())["result"], 16)
+        tx_block = int(receipt["blockNumber"], 16) if receipt.get("blockNumber") else None
+        confirmations = (current_block - tx_block) if tx_block else 0
+
+    if not status_ok:
+        return {"ok": False, "reason": "Cette transaction a échoué sur la blockchain (statut reverted)."}
+
+    if received < expected_amount * (1 - PAYMENT_TOLERANCE):
+        return {
+            "ok": False,
+            "reason": f"Montant insuffisant : reçu **{received:.2f} USDT**, attendu **{expected_amount:.2f} USDT**.",
+        }
+
+    if confirmations < MIN_CONFIRMATIONS_ETH:
+        return {
+            "ok": False,
+            "pending": True,
+            "reason": f"Transaction détectée mais peu confirmée ({confirmations} bloc(s)). Réessaie dans quelques minutes.",
+        }
+
+    return {"ok": True, "amount": received, "confirmations": confirmations}
+
+
+CHECKERS = {"BTC": check_btc_tx, "ETH": check_eth_tx, "USDT_ERC20": check_usdt_tx}
+CURRENCY_LABELS = {"BTC": "Bitcoin (BTC)", "ETH": "Ethereum (ETH)", "USDT_ERC20": "USDT (réseau ERC-20)"}
+
+
+class PaymentModal(discord.ui.Modal, title="Confirmer mon paiement"):
+    tx_link = discord.ui.TextInput(
+        label="Lien ou hash de la transaction",
+        placeholder="https://blockstream.info/tx/xxxxxxxx... ou juste le hash",
+        style=discord.TextStyle.short,
+        required=True,
+        max_length=200,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer(thinking=True)
+
+        conf = guild_conf(interaction.guild.id)
+        payment = conf.get("payments", {}).get(str(interaction.channel.id))
+        if not payment:
+            return await interaction.followup.send(
+                "⚠️ Aucune demande de paiement active dans ce ticket. Un membre du staff doit "
+                "d'abord utiliser `/request_payment`.",
+                ephemeral=True,
+            )
+
+        currency = payment["currency"]
+        expected = payment["amount"]
+        wallet = WALLETS[currency]
+        txid = extract_txid(self.tx_link.value)
+
+        checker = CHECKERS[currency]
+        try:
+            result = await checker(txid, expected, wallet)
+        except Exception as e:
+            print(f"[ERREUR paiement] {e!r}")
+            return await interaction.followup.send(
+                "⚠️ Erreur lors de la vérification (API indisponible). Réessaie dans une minute "
+                "ou attends la validation manuelle du staff.",
+                ephemeral=True,
+            )
+
+        role_admin = get_role(interaction.guild, R_ADMIN)
+        ping = role_admin.mention if role_admin else ""
+
+        if result["ok"]:
+            conf["payments"][str(interaction.channel.id)]["status"] = "verified"
+            conf["payments"][str(interaction.channel.id)]["txid"] = txid
+            save_data(DATA)
+
+            e = discord.Embed(
+                title="✅ Paiement vérifié automatiquement",
+                description=(
+                    f"**Devise :** {CURRENCY_LABELS[currency]}\n"
+                    f"**Montant reçu :** `{result['amount']}` (attendu : `{expected}`)\n"
+                    f"**Confirmations :** {result['confirmations']}\n"
+                    f"**Transaction :** `{txid}`"
+                ),
+                colour=C_MEMBRE,
+            )
+            await interaction.followup.send(
+                content=f"{ping} — paiement vérifié, il ne reste plus qu'à confirmer manuellement.",
+                embed=e,
+                view=PaymentConfirmView(),
+                allowed_mentions=discord.AllowedMentions(roles=True),
+            )
+            await log_event(
+                interaction.guild,
+                discord.Embed(
+                    title="💰 Paiement crypto vérifié",
+                    description=f"{interaction.user.mention} • {CURRENCY_LABELS[currency]} • `{result['amount']}`\n{interaction.channel.mention}",
+                    colour=C_MEMBRE,
+                ),
+            )
+        else:
+            colour = 0xE67E22 if result.get("pending") else C_BOOSTER
+            e = discord.Embed(
+                title="⏳ En attente" if result.get("pending") else "❌ Vérification échouée",
+                description=result["reason"],
+                colour=colour,
+            )
+            await interaction.followup.send(embed=e)
+            if not result.get("pending"):
+                await interaction.channel.send(
+                    f"{ping} — échec de vérification automatique, un contrôle manuel est nécessaire."
+                )
+
+
+class PaymentRequestView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="J'ai payé",
+        emoji="💸",
+        style=discord.ButtonStyle.success,
+        custom_id="persistent:payment_paid",
+    )
+    async def paid(self, interaction: discord.Interaction, button: discord.ui.Button):
+        conf = guild_conf(interaction.guild.id)
+        payment = conf.get("payments", {}).get(str(interaction.channel.id))
+        if not payment:
+            return await interaction.response.send_message(
+                "⚠️ Aucune demande de paiement active ici.", ephemeral=True
+            )
+        if payment.get("status") == "confirmed":
+            return await interaction.response.send_message(
+                "✅ Ce paiement a déjà été confirmé par le staff.", ephemeral=True
+            )
+        await interaction.response.send_modal(PaymentModal())
+
+
+class PaymentConfirmView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(
+        label="Confirmer et débloquer (staff)",
+        emoji="🔓",
+        style=discord.ButtonStyle.primary,
+        custom_id="persistent:payment_confirm",
+    )
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        role_admin = get_role(interaction.guild, R_ADMIN)
+        if not role_admin or role_admin not in interaction.user.roles:
+            return await interaction.response.send_message(
+                "⛔ Réservé au staff.", ephemeral=True
+            )
+
+        conf = guild_conf(interaction.guild.id)
+        payment = conf.get("payments", {}).get(str(interaction.channel.id))
+        if payment:
+            payment["status"] = "confirmed"
+            save_data(DATA)
+
+        button.disabled = True
+        button.label = f"Confirmé par {interaction.user.display_name}"
+        await interaction.response.edit_message(view=self)
+        await interaction.channel.send(
+            f"🔓 {interaction.user.mention} a confirmé le paiement. Le service peut démarrer."
         )
 
 
@@ -932,6 +1252,54 @@ async def verifypanel(interaction: discord.Interaction):
     )
     await interaction.channel.send(embed=e, view=VerifyView())
     await interaction.response.send_message("✅ Panneau envoyé.", ephemeral=True)
+
+
+@bot.tree.command(name="request_payment", description="Ouvre une demande de paiement crypto dans ce ticket.")
+@app_commands.describe(montant="Montant attendu", devise="Devise du paiement")
+@app_commands.choices(devise=[
+    app_commands.Choice(name="Bitcoin (BTC)", value="BTC"),
+    app_commands.Choice(name="Ethereum (ETH)", value="ETH"),
+    app_commands.Choice(name="USDT (ERC-20)", value="USDT_ERC20"),
+])
+async def request_payment(
+    interaction: discord.Interaction, montant: float, devise: app_commands.Choice[str]
+):
+    role_admin = get_role(interaction.guild, R_ADMIN)
+    if not role_admin or role_admin not in interaction.user.roles:
+        return await interaction.response.send_message("⛔ Réservé au staff.", ephemeral=True)
+
+    if not (interaction.channel.topic or "").startswith("ticket-owner:"):
+        return await interaction.response.send_message(
+            "⛔ Cette commande ne fonctionne que dans un ticket.", ephemeral=True
+        )
+
+    wallet = WALLETS.get(devise.value, "")
+    if not wallet:
+        return await interaction.response.send_message(
+            f"⚠️ Aucune adresse configurée pour {devise.name}. Renseigne-la dans WALLETS en haut de bot.py.",
+            ephemeral=True,
+        )
+
+    conf = guild_conf(interaction.guild.id)
+    conf.setdefault("payments", {})[str(interaction.channel.id)] = {
+        "currency": devise.value,
+        "amount": montant,
+        "status": "pending",
+    }
+    save_data(DATA)
+
+    e = discord.Embed(
+        title="💸  Demande de paiement",
+        description=(
+            f"**Montant :** `{montant}` {devise.name}\n"
+            f"**Adresse :**\n```\n{wallet}\n```\n\n"
+            "Une fois le paiement envoyé, clique sur le bouton ci-dessous et colle le lien "
+            "de ta transaction (Blockstream, Etherscan…) ou simplement son hash."
+        ),
+        colour=C_CLIENT,
+    )
+    e.set_footer(text="Vérification automatique, confirmation finale par le staff.")
+    await interaction.response.send_message(embed=e, view=PaymentRequestView())
 
 
 @bot.tree.command(name="add", description="Ajoute un membre au ticket courant.")
