@@ -56,9 +56,9 @@ DATA_FILE = "bot_data.json"
 # Remplace ces adresses par les tiennes. Laisse vide "" pour désactiver
 # une devise (la commande /request_payment ne la proposera plus).
 WALLETS = {
-    "BTC": "",              # ex: bc1qxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-    "ETH": "",               # ex: 0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-    "USDT_ERC20": "",        # même adresse ETH en général, mais séparée au cas où
+    "BTC": "bc1q2czkdzj2tm3vekfrssr5ysfwl76wmfmw26f560",              # ex: bc1qxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    "ETH": "0x925d5d72C15ebF8cBB5C492F17786Bf632d29F97",               # ex: 0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    "USDT_ERC20": "0x925d5d72C15ebF8cBB5C492F17786Bf632d29F97",        # même adresse ETH en général, mais séparée au cas où
 }
 
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "")
