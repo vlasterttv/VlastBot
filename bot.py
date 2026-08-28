@@ -56,6 +56,39 @@ LOCKDOWN_DURATION = 300      # Durée du lockdown en secondes
 
 DATA_FILE = "bot_data.json"
 
+# --- Emojis du serveur (IDs récupérés via \:nom: dans Discord) ---------
+EMO = {
+    "iron1": "<:valorantiron1:1542912599161569280>",
+    "iron2": "<:valorantiron2:1542912569860296805>",
+    "iron3": "<:valorantiron3:1542912533705400400>",
+    "bronze1": "<:valorantbronze1:1542912473575989268>",
+    "bronze2": "<:valorantbronze2:1542912435714002994>",
+    "bronze3": "<:valorantbronze3:1542912403098959954>",
+    "silver1": "<:valorantsilver1:1542912358119378984>",
+    "silver2": "<:valorantsilver2:1542912325386899507>",
+    "silver3": "<:valorantsilver3:1542912283322351727>",
+    "gold1": "<:valorantgold1:1542912240854769837>",
+    "gold2": "<:valorantgold2:1542912212111327345>",
+    "gold3": "<:valorantgold3:1542912184625930240>",
+    "plat1": "<:valorantplatinum1:1542912150253605035>",
+    "plat2": "<:valorantplatinum2:1542912120088297632>",
+    "plat3": "<:valorantplatinum3:1542912075607842897>",
+    "dia1": "<:valorantdiamond1:1542912049162756180>",
+    "dia2": "<:valorantdiamond2:1542912005999169577>",
+    "dia3": "<:valorantdiamond3:1542911979155497001>",
+    "asc1": "<:valorantascendant1:1542911948105064468>",
+    "asc2": "<:valorantascendant2:1542911922146648206>",
+    "asc3": "<:valorantascendant3:1542911901519052900>",
+    "immo1": "<:valorantimmortal1:1542911864659386398>",
+    "immo2": "<:valorantimmortal2:1542911831847211070>",
+    "immo3": "<:valorantimmortal3:1542911806832386129>",
+    "radiant": "<:valorantradiant:1542911768190521427>",
+    "paypal": "<:1716_PAYPAL:1542978995581100122>",
+    "btc": "<:Bitcoin:1542978979483484190>",
+    "eth": "<:18119ethereum:1542979675200950303>",
+    "usdt": "<:7541tetherusdtCopie:1542978958600044634>",
+}
+
 # --- Paiements crypto (vérification manuelle assistée) -----------------
 # Remplace ces adresses par les tiennes. Laisse vide "" pour désactiver
 # une devise (la commande /request_payment ne la proposera plus).
@@ -1271,7 +1304,9 @@ async def setup(interaction: discord.Interaction):
     e.add_field(
         name="🥉  Fer • Bronze • Argent",
         value=(
-            ":valorantiron1: → :valorantsilver3:\n"
+            f"{EMO['iron1']}{EMO['iron2']}{EMO['iron3']}"
+            f"{EMO['bronze1']}{EMO['bronze2']}{EMO['bronze3']}"
+            f"{EMO['silver1']}{EMO['silver2']}{EMO['silver3']}\n"
             "```\n"
             "Fer 1    → Bronze 3    ...\n"
             "Bronze 1 → Argent 3    ...\n"
@@ -1283,7 +1318,9 @@ async def setup(interaction: discord.Interaction):
     e.add_field(
         name="🥈  Or • Platine • Diamant",
         value=(
-            ":valorantgold1: → :valorantdiamond3:\n"
+            f"{EMO['gold1']}{EMO['gold2']}{EMO['gold3']}"
+            f"{EMO['plat1']}{EMO['plat2']}{EMO['plat3']}"
+            f"{EMO['dia1']}{EMO['dia2']}{EMO['dia3']}\n"
             "```\n"
             "Or 1      → Platine 1   ...\n"
             "Platine 1 → Diamant 1   ...\n"
@@ -1295,7 +1332,8 @@ async def setup(interaction: discord.Interaction):
     e.add_field(
         name="🥇  Ascendant • Immortel • Radiant",
         value=(
-            ":valorantascendant1: → :valorantradiant:\n"
+            f"{EMO['asc1']}{EMO['asc2']}{EMO['asc3']}"
+            f"{EMO['immo1']}{EMO['immo2']}{EMO['immo3']}{EMO['radiant']}\n"
             "```\n"
             "Ascendant 1 → Immortel 1  ...\n"
             "Immortel 1  → Immortel 3  ...\n"
@@ -1317,13 +1355,15 @@ async def setup(interaction: discord.Interaction):
     e.add_field(
         name="💳  Paiements acceptés",
         value=(
-            "> <:paypal:0> **PayPal** — Amis & Famille uniquement\n"
-            "> ₿ **Bitcoin** (BTC)\n"
-            "> ⟠ **Ethereum** (ETH)\n"
-            "> ₮ **USDT** — réseau ERC-20 uniquement"
+            f"> {EMO['paypal']} **PayPal** — Amis & Famille uniquement\n"
+            f"> {EMO['btc']} **Bitcoin** (BTC)\n"
+            f"> {EMO['eth']} **Ethereum** (ETH)\n"
+            f"> {EMO['usdt']} **USDT** — réseau ERC-20 uniquement"
         ),
         inline=False,
     )
+    if guild.icon:
+        e.set_thumbnail(url=guild.icon.url)
     e.set_footer(text="Aucun paiement en dehors d'un ticket officiel • Prix indicatifs")
     await ch_price_fr.send(embed=e)
 
@@ -1341,7 +1381,9 @@ async def setup(interaction: discord.Interaction):
     e.add_field(
         name="🥉  Iron • Bronze • Silver",
         value=(
-            ":valorantiron1: → :valorantsilver3:\n"
+            f"{EMO['iron1']}{EMO['iron2']}{EMO['iron3']}"
+            f"{EMO['bronze1']}{EMO['bronze2']}{EMO['bronze3']}"
+            f"{EMO['silver1']}{EMO['silver2']}{EMO['silver3']}\n"
             "```\n"
             "Iron 1   → Bronze 3   ...\n"
             "Bronze 1 → Silver 3   ...\n"
@@ -1353,7 +1395,9 @@ async def setup(interaction: discord.Interaction):
     e.add_field(
         name="🥈  Gold • Platinum • Diamond",
         value=(
-            ":valorantgold1: → :valorantdiamond3:\n"
+            f"{EMO['gold1']}{EMO['gold2']}{EMO['gold3']}"
+            f"{EMO['plat1']}{EMO['plat2']}{EMO['plat3']}"
+            f"{EMO['dia1']}{EMO['dia2']}{EMO['dia3']}\n"
             "```\n"
             "Gold 1     → Platinum 1  ...\n"
             "Platinum 1 → Diamond 1   ...\n"
@@ -1365,7 +1409,8 @@ async def setup(interaction: discord.Interaction):
     e.add_field(
         name="🥇  Ascendant • Immortal • Radiant",
         value=(
-            ":valorantascendant1: → :valorantradiant:\n"
+            f"{EMO['asc1']}{EMO['asc2']}{EMO['asc3']}"
+            f"{EMO['immo1']}{EMO['immo2']}{EMO['immo3']}{EMO['radiant']}\n"
             "```\n"
             "Ascendant 1 → Immortal 1  ...\n"
             "Immortal 1  → Immortal 3  ...\n"
@@ -1387,13 +1432,15 @@ async def setup(interaction: discord.Interaction):
     e.add_field(
         name="💳  Accepted payments",
         value=(
-            "> **PayPal** — Friends & Family only\n"
-            "> ₿ **Bitcoin** (BTC)\n"
-            "> ⟠ **Ethereum** (ETH)\n"
-            "> ₮ **USDT** — ERC-20 network only"
+            f"> {EMO['paypal']} **PayPal** — Friends & Family only\n"
+            f"> {EMO['btc']} **Bitcoin** (BTC)\n"
+            f"> {EMO['eth']} **Ethereum** (ETH)\n"
+            f"> {EMO['usdt']} **USDT** — ERC-20 network only"
         ),
         inline=False,
     )
+    if guild.icon:
+        e.set_thumbnail(url=guild.icon.url)
     e.set_footer(text="No payment outside an official ticket • Indicative prices")
     await ch_price_en.send(embed=e)
 
