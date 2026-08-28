@@ -35,6 +35,8 @@ R_BOOSTER = "🚀 Booster"
 R_CLIENT = "💰 Client"
 R_MEMBRE = "💬 Membre"
 R_UNVERIFIED = "🔒 Non vérifié"
+R_FR = "🇫🇷 Français"
+R_EN = "🇬🇧 English"
 
 # --- Couleurs ---
 # 0x000000 est traité comme "pas de couleur" par Discord -> on utilise 0x010101
@@ -43,6 +45,8 @@ C_BOOSTER = 0xE74C3C    # Rouge
 C_CLIENT = 0xF1C40F     # Jaune
 C_MEMBRE = 0x5DADE2     # Bleu ciel
 C_UNVERIFIED = 0x2B2D31 # Gris fondu
+C_FR = 0x8E9BFF         # Bleu-violet doux
+C_EN = 0xB0B8C4         # Gris-bleu neutre
 
 # --- Anti-raid ---
 MIN_ACCOUNT_AGE_DAYS = 7     # Âge minimum du compte pour se vérifier
@@ -56,9 +60,9 @@ DATA_FILE = "bot_data.json"
 # Remplace ces adresses par les tiennes. Laisse vide "" pour désactiver
 # une devise (la commande /request_payment ne la proposera plus).
 WALLETS = {
-    "BTC": "bc1q2czkdzj2tm3vekfrssr5ysfwl76wmfmw26f560",              # ex: bc1qxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-    "ETH": "0x925d5d72C15ebF8cBB5C492F17786Bf632d29F97",               # ex: 0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
-    "USDT_ERC20": "0x925d5d72C15ebF8cBB5C492F17786Bf632d29F97",        # même adresse ETH en général, mais séparée au cas où
+    "BTC": "",              # ex: bc1qxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    "ETH": "",               # ex: 0xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    "USDT_ERC20": "",        # même adresse ETH en général, mais séparée au cas où
 }
 
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "")
@@ -110,6 +114,7 @@ class BoostBot(commands.Bot):
         # Vues persistantes : les boutons restent actifs après un redémarrage
         self.add_view(VerifyView())
         self.add_view(TicketPanelView())
+        self.add_view(TicketPanelViewEN())
         self.add_view(TicketControlView())
         self.add_view(PaymentRequestView())
         self.add_view(PaymentConfirmView())
@@ -163,38 +168,39 @@ async def log_event(guild: discord.Guild, embed: discord.Embed):
 
 
 class VerifyView(discord.ui.View):
+    """Vérification bilingue : le choix de la langue vaut validation."""
+
     def __init__(self):
         super().__init__(timeout=None)
 
-    @discord.ui.button(
-        label="Je vérifie mon compte",
-        emoji="✅",
-        style=discord.ButtonStyle.success,
-        custom_id="persistent:verify",
-    )
-    async def verify(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def _do_verify(self, interaction: discord.Interaction, lang: str):
         guild = interaction.guild
         member = interaction.user
 
         role_membre = get_role(guild, R_MEMBRE)
         role_unverified = get_role(guild, R_UNVERIFIED)
+        role_lang = get_role(guild, R_FR if lang == "fr" else R_EN)
+        role_other = get_role(guild, R_EN if lang == "fr" else R_FR)
 
-        if role_membre is None:
+        if role_membre is None or role_lang is None:
             return await interaction.response.send_message(
-                "⚠️ Le rôle membre est introuvable. Contacte un administrateur.",
+                "⚠️ Rôles introuvables. Un administrateur doit relancer `/setup`.\n"
+                "⚠️ Roles not found. An administrator must run `/setup` again.",
                 ephemeral=True,
             )
 
         if role_membre in member.roles:
             return await interaction.response.send_message(
-                "✅ Tu es déjà vérifié.", ephemeral=True
+                "✅ Tu es déjà vérifié. Utilise `/langue` pour changer de langue.\n"
+                "✅ You are already verified. Use `/langue` to switch language.",
+                ephemeral=True,
             )
 
         # --- Lockdown anti-raid actif ---
         if bot.lockdown.get(guild.id, 0) > time.time():
             return await interaction.response.send_message(
-                "🛡️ Le serveur est en **mode protection** suite à une vague de connexions "
-                "suspectes. Réessaie dans quelques minutes.",
+                "🛡️ Le serveur est en **mode protection**. Réessaie dans quelques minutes.\n"
+                "🛡️ The server is in **protection mode**. Try again in a few minutes.",
                 ephemeral=True,
             )
 
@@ -210,37 +216,66 @@ class VerifyView(discord.ui.View):
                 ),
             )
             return await interaction.response.send_message(
-                f"🚫 Ton compte Discord est trop récent (**{age.days} jour(s)**).\n"
-                f"Un minimum de **{MIN_ACCOUNT_AGE_DAYS} jours** est requis. "
-                "Ouvre un ticket si tu penses que c'est une erreur.",
+                f"🚫 Ton compte est trop récent (**{age.days}j**, minimum {MIN_ACCOUNT_AGE_DAYS}j).\n"
+                f"🚫 Your account is too new (**{age.days}d**, minimum {MIN_ACCOUNT_AGE_DAYS}d).",
                 ephemeral=True,
             )
 
         try:
-            await member.add_roles(role_membre, reason="Vérification réussie")
-            if role_unverified and role_unverified in member.roles:
-                await member.remove_roles(role_unverified, reason="Vérification réussie")
+            to_add = [role_membre, role_lang]
+            await member.add_roles(*to_add, reason=f"Vérification réussie ({lang})")
+            to_remove = [r for r in (role_unverified, role_other) if r and r in member.roles]
+            if to_remove:
+                await member.remove_roles(*to_remove, reason="Vérification réussie")
         except discord.Forbidden:
             return await interaction.response.send_message(
-                "⚠️ Je n'ai pas les permissions nécessaires. Mon rôle doit être **au-dessus** "
-                "des rôles que j'attribue.",
+                "⚠️ Permissions insuffisantes : mon rôle doit être **au-dessus** des autres.\n"
+                "⚠️ Missing permissions: my role must be **above** the others.",
                 ephemeral=True,
             )
 
-        await interaction.response.send_message(
-            "🎉 **Bienvenue !** Tu as maintenant accès à l'intégralité du serveur.\n"
-            "Passe par la catégorie **Ticket Boost** pour commander.",
-            ephemeral=True,
-        )
+        if lang == "fr":
+            msg = (
+                "🎉 **Bienvenue !** Tu as maintenant accès aux salons francophones.\n"
+                "Passe par la catégorie **Ticket Boost** pour commander."
+            )
+        else:
+            msg = (
+                "🎉 **Welcome!** You now have access to the English channels.\n"
+                "Head to the **Boost Tickets** category to place an order."
+            )
+        await interaction.response.send_message(msg, ephemeral=True)
 
         await log_event(
             guild,
             discord.Embed(
                 title="✅ Nouveau membre vérifié",
-                description=f"{member.mention} • `{member}`\nCompte créé il y a **{age.days} jours**.",
+                description=(
+                    f"{member.mention} • `{member}`\n"
+                    f"Langue : **{'Français' if lang == 'fr' else 'English'}**\n"
+                    f"Compte créé il y a **{age.days} jours**."
+                ),
                 colour=C_MEMBRE,
             ),
         )
+
+    @discord.ui.button(
+        label="Français",
+        emoji="🇫🇷",
+        style=discord.ButtonStyle.primary,
+        custom_id="persistent:verify_fr",
+    )
+    async def verify_fr(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._do_verify(interaction, "fr")
+
+    @discord.ui.button(
+        label="English",
+        emoji="🇬🇧",
+        style=discord.ButtonStyle.secondary,
+        custom_id="persistent:verify_en",
+    )
+    async def verify_en(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self._do_verify(interaction, "en")
 
 
 # ======================================================================
@@ -549,8 +584,10 @@ class PaymentConfirmView(discord.ui.View):
 TICKET_TYPES = {
     "boost": {
         "label": "Commander un boost",
+        "label_en": "Order a boost",
         "emoji": "🚀",
         "desc": "Faire monter ton rang par un booster vérifié",
+        "desc_en": "Get your rank raised by a verified booster",
         "prefix": "boost",
         "intro": (
             "Merci pour ta commande ! Pour aller vite, indique-nous :\n"
@@ -560,11 +597,21 @@ TICKET_TYPES = {
             "> **4.** Le mode souhaité (compte partagé ou duo)\n\n"
             "Un membre du staff arrive pour te chiffrer ça."
         ),
+        "intro_en": (
+            "Thanks for your order! To speed things up, please tell us:\n"
+            "> **1.** The game\n"
+            "> **2.** Your current rank and target rank\n"
+            "> **3.** Your region / server\n"
+            "> **4.** Preferred mode (account sharing or duo)\n\n"
+            "A staff member will be with you shortly with a quote."
+        ),
     },
     "booster": {
         "label": "Devenir Booster",
+        "label_en": "Become a Booster",
         "emoji": "💪",
         "desc": "Rejoindre l'équipe et gagner de l'argent",
+        "desc_en": "Join the team and earn money",
         "prefix": "booster",
         "intro": (
             "Content de voir que tu veux rejoindre l'équipe. Envoie-nous :\n"
@@ -574,11 +621,21 @@ TICKET_TYPES = {
             "> **4.** Tes éventuelles expériences de boost précédentes\n\n"
             "Un recruteur va prendre ton dossier en charge."
         ),
+        "intro_en": (
+            "Glad you want to join the team. Please send us:\n"
+            "> **1.** Your current rank + proof (screenshot / tracker)\n"
+            "> **2.** Your peak history over recent seasons\n"
+            "> **3.** Your weekly availability\n"
+            "> **4.** Any previous boosting experience\n\n"
+            "A recruiter will pick up your application."
+        ),
     },
     "staff": {
         "label": "Candidature Staff",
+        "label_en": "Staff Application",
         "emoji": "🛡️",
         "desc": "Postuler pour un poste de modération / support",
+        "desc_en": "Apply for a moderation / support position",
         "prefix": "staff",
         "intro": (
             "Merci pour ta candidature. Détaille-nous :\n"
@@ -588,11 +645,117 @@ TICKET_TYPES = {
             "> **4.** Pourquoi toi plutôt qu'un autre\n\n"
             "Prends le temps de bien répondre, c'est ce qu'on regarde en premier."
         ),
+        "intro_en": (
+            "Thanks for applying. Please detail:\n"
+            "> **1.** Your age and time zone\n"
+            "> **2.** Your moderation experience\n"
+            "> **3.** Your estimated daily availability\n"
+            "> **4.** Why you rather than someone else\n\n"
+            "Take your time answering — that's what we look at first."
+        ),
     },
 }
 
 
+async def _create_ticket(interaction: discord.Interaction, kind: str, lang: str):
+    """Logique commune de création de ticket, dans la langue demandée."""
+    cfg = TICKET_TYPES[kind]
+    guild = interaction.guild
+    member = interaction.user
+    is_fr = lang == "fr"
+
+    existing = discord.utils.find(
+        lambda c: c.topic == f"ticket-owner:{member.id}", guild.text_channels
+    )
+    if existing:
+        return await interaction.followup.send(
+            (f"⚠️ Tu as déjà un ticket ouvert : {existing.mention}" if is_fr
+             else f"⚠️ You already have an open ticket: {existing.mention}"),
+            ephemeral=True,
+        )
+
+    conf = guild_conf(guild.id)
+    key = "ticket_category_fr" if is_fr else "ticket_category_en"
+    category = guild.get_channel(conf.get(key, 0))
+    if category is None:
+        return await interaction.followup.send(
+            ("⚠️ Catégorie de tickets introuvable. Relance `/setup`." if is_fr
+             else "⚠️ Ticket category not found. Run `/setup` again."),
+            ephemeral=True,
+        )
+
+    role_admin = get_role(guild, R_ADMIN)
+    role_booster = get_role(guild, R_BOOSTER)
+
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(view_channel=False),
+        member: discord.PermissionOverwrite(
+            view_channel=True, send_messages=True, read_message_history=True,
+            attach_files=True, embed_links=True,
+        ),
+        guild.me: discord.PermissionOverwrite(
+            view_channel=True, send_messages=True, manage_channels=True
+        ),
+    }
+    if role_admin:
+        overwrites[role_admin] = discord.PermissionOverwrite(
+            view_channel=True, send_messages=True, manage_messages=True
+        )
+    if role_booster and kind == "boost":
+        overwrites[role_booster] = discord.PermissionOverwrite(
+            view_channel=True, send_messages=True
+        )
+
+    DATA["ticket_counter"] += 1
+    number = DATA["ticket_counter"]
+    save_data(DATA)
+
+    channel = await guild.create_text_channel(
+        name=f"{cfg['emoji']}・{cfg['prefix']}-{number:04d}",
+        category=category,
+        overwrites=overwrites,
+        topic=f"ticket-owner:{member.id}",
+        reason=f"Ticket {kind} ({lang}) ouvert par {member}",
+    )
+
+    embed = discord.Embed(
+        title=f"{cfg['emoji']}  {cfg['label'] if is_fr else cfg['label_en']}  •  Ticket #{number:04d}",
+        description=cfg["intro"] if is_fr else cfg["intro_en"],
+        colour=C_CLIENT,
+        timestamp=discord.utils.utcnow(),
+    )
+    embed.set_footer(
+        text=(f"Ouvert par {member}" if is_fr else f"Opened by {member}"),
+        icon_url=member.display_avatar.url,
+    )
+
+    ping = role_admin.mention if role_admin else ""
+    await channel.send(
+        content=f"{member.mention} {ping}",
+        embed=embed,
+        view=TicketControlView(),
+        allowed_mentions=discord.AllowedMentions(users=True, roles=True),
+    )
+
+    await interaction.followup.send(
+        (f"✅ Ton ticket a été créé : {channel.mention}" if is_fr
+         else f"✅ Your ticket has been created: {channel.mention}"),
+        ephemeral=True,
+    )
+
+    await log_event(
+        guild,
+        discord.Embed(
+            title="🎟️ Ticket ouvert",
+            description=f"**{cfg['label']}** ({lang.upper()}) — {channel.mention}\nPar {member.mention}",
+            colour=C_CLIENT,
+        ),
+    )
+
+
 class TicketPanelView(discord.ui.View):
+    """Panneau francophone."""
+
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -608,99 +771,32 @@ class TicketPanelView(discord.ui.View):
             for k, v in TICKET_TYPES.items()
         ],
     )
-    async def select_ticket(
-        self, interaction: discord.Interaction, select: discord.ui.Select
-    ):
+    async def select_ticket(self, interaction: discord.Interaction, select: discord.ui.Select):
         await interaction.response.defer(ephemeral=True, thinking=True)
+        await _create_ticket(interaction, select.values[0], "fr")
 
-        kind = select.values[0]
-        cfg = TICKET_TYPES[kind]
-        guild = interaction.guild
-        member = interaction.user
 
-        # --- Un seul ticket ouvert à la fois ---
-        existing = discord.utils.find(
-            lambda c: c.topic == f"ticket-owner:{member.id}",
-            guild.text_channels,
-        )
-        if existing:
-            return await interaction.followup.send(
-                f"⚠️ Tu as déjà un ticket ouvert : {existing.mention}", ephemeral=True
+class TicketPanelViewEN(discord.ui.View):
+    """English panel."""
+
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.select(
+        placeholder="📩 Select the reason for your ticket…",
+        custom_id="persistent:ticket_select_en",
+        min_values=1,
+        max_values=1,
+        options=[
+            discord.SelectOption(
+                label=v["label_en"], value=k, emoji=v["emoji"], description=v["desc_en"]
             )
-
-        conf = guild_conf(guild.id)
-        category = guild.get_channel(conf.get("ticket_category", 0))
-        if category is None:
-            return await interaction.followup.send(
-                "⚠️ Catégorie de tickets introuvable. Relance `/setup`.", ephemeral=True
-            )
-
-        role_admin = get_role(guild, R_ADMIN)
-        role_booster = get_role(guild, R_BOOSTER)
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(view_channel=False),
-            member: discord.PermissionOverwrite(
-                view_channel=True,
-                send_messages=True,
-                read_message_history=True,
-                attach_files=True,
-                embed_links=True,
-            ),
-            guild.me: discord.PermissionOverwrite(
-                view_channel=True, send_messages=True, manage_channels=True
-            ),
-        }
-        if role_admin:
-            overwrites[role_admin] = discord.PermissionOverwrite(
-                view_channel=True, send_messages=True, manage_messages=True
-            )
-        # Les boosters ne voient que les tickets de commande
-        if role_booster and kind == "boost":
-            overwrites[role_booster] = discord.PermissionOverwrite(
-                view_channel=True, send_messages=True
-            )
-
-        DATA["ticket_counter"] += 1
-        number = DATA["ticket_counter"]
-        save_data(DATA)
-
-        channel = await guild.create_text_channel(
-            name=f"{cfg['emoji']}・{cfg['prefix']}-{number:04d}",
-            category=category,
-            overwrites=overwrites,
-            topic=f"ticket-owner:{member.id}",
-            reason=f"Ticket {kind} ouvert par {member}",
-        )
-
-        embed = discord.Embed(
-            title=f"{cfg['emoji']}  {cfg['label']}  •  Ticket #{number:04d}",
-            description=cfg["intro"],
-            colour=C_CLIENT,
-            timestamp=discord.utils.utcnow(),
-        )
-        embed.set_footer(text=f"Ouvert par {member}", icon_url=member.display_avatar.url)
-
-        ping = role_admin.mention if role_admin else ""
-        await channel.send(
-            content=f"{member.mention} {ping}",
-            embed=embed,
-            view=TicketControlView(),
-            allowed_mentions=discord.AllowedMentions(users=True, roles=True),
-        )
-
-        await interaction.followup.send(
-            f"✅ Ton ticket a été créé : {channel.mention}", ephemeral=True
-        )
-
-        await log_event(
-            guild,
-            discord.Embed(
-                title="🎟️ Ticket ouvert",
-                description=f"**{cfg['label']}** — {channel.mention}\nPar {member.mention}",
-                colour=C_CLIENT,
-            ),
-        )
+            for k, v in TICKET_TYPES.items()
+        ],
+    )
+    async def select_ticket_en(self, interaction: discord.Interaction, select: discord.ui.Select):
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        await _create_ticket(interaction, select.values[0], "en")
 
 
 class TicketControlView(discord.ui.View):
@@ -862,6 +958,8 @@ async def setup(interaction: discord.Interaction):
         (R_BOOSTER, C_BOOSTER, perms_booster, True),
         (R_CLIENT, C_CLIENT, perms_membre, True),
         (R_MEMBRE, C_MEMBRE, perms_membre, False),
+        (R_FR, C_FR, perms_none, False),
+        (R_EN, C_EN, perms_none, False),
         (R_UNVERIFIED, C_UNVERIFIED, perms_none, False),
     ]
 
@@ -885,6 +983,8 @@ async def setup(interaction: discord.Interaction):
     r_booster = roles[R_BOOSTER]
     r_client = roles[R_CLIENT]
     r_membre = roles[R_MEMBRE]
+    r_fr = roles[R_FR]
+    r_en = roles[R_EN]
     r_unverif = roles[R_UNVERIFIED]
 
     # ------------------------------------------------------------------
@@ -921,31 +1021,38 @@ async def setup(interaction: discord.Interaction):
         manage_messages=True, connect=True, speak=True,
     )
 
-    ow_public_read = {guild.default_role: DENY, r_unverif: DENY, r_membre: READONLY, r_admin: STAFF}
-    ow_public_talk = {guild.default_role: DENY, r_unverif: DENY, r_membre: TALK, r_admin: STAFF}
+    def lang_ow(role_lang, mode):
+        """Construit les permissions d'une catégorie réservée à une langue."""
+        perm = {"read": READONLY, "talk": TALK, "see": SEE}[mode]
+        return {
+            guild.default_role: DENY,
+            r_unverif: DENY,
+            r_fr: DENY,
+            r_en: DENY,
+            role_lang: perm,
+            r_admin: STAFF,
+        }
+
     ow_verify = {
         guild.default_role: DENY,
         r_unverif: discord.PermissionOverwrite(
             view_channel=True, read_message_history=True, send_messages=False
         ),
-        r_membre: DENY,
+        r_fr: DENY,
+        r_en: DENY,
         r_admin: SEE,
-    }
-    ow_tickets = {
-        guild.default_role: DENY,
-        r_unverif: DENY,
-        r_membre: READONLY,
-        r_booster: SEE,
-        r_admin: STAFF,
     }
     ow_admin = {
         guild.default_role: DENY,
-        r_unverif: DENY,
-        r_membre: DENY,
-        r_client: DENY,
-        r_booster: DENY,
+        r_unverif: DENY, r_membre: DENY, r_client: DENY,
+        r_fr: DENY, r_en: DENY, r_booster: DENY,
         r_admin: STAFF,
     }
+
+    def ticket_ow(role_lang):
+        ow = lang_ow(role_lang, "read")
+        ow[r_booster] = SEE
+        return ow
 
     # ------------------------------------------------------------------
     #  4. CATÉGORIES & SALONS
@@ -953,6 +1060,7 @@ async def setup(interaction: discord.Interaction):
     async def make_category(name, overwrites):
         existing = discord.utils.get(guild.categories, name=name)
         if existing:
+            await existing.edit(overwrites=overwrites)
             return existing
         cat = await guild.create_category(name, overwrites=overwrites, reason="Setup")
         await asyncio.sleep(0.3)
@@ -978,28 +1086,41 @@ async def setup(interaction: discord.Interaction):
         await asyncio.sleep(0.3)
         return ch
 
-    # --- 🔐 VÉRIFICATION ---
-    cat_verif = await make_category("🔐・VÉRIFICATION", ow_verify)
-    ch_verif = await make_text(cat_verif, "╰✅・vérification", ow_verify)
+    # --- 🔐 VÉRIFICATION (commun, visible par les non vérifiés) ---
+    cat_verif = await make_category("🔐・VERIFICATION", ow_verify)
+    ch_verif = await make_text(cat_verif, "╰✅・vérification-verification", ow_verify)
 
-    # --- 📋 INFORMATION ---
-    cat_info = await make_category("📋・INFORMATION", ow_public_read)
-    ch_welcome = await make_text(cat_info, "├👋・bienvenue", ow_public_read)
-    ch_rules = await make_text(cat_info, "├📜・règlement", ow_public_read)
-    ch_vouches = await make_text(cat_info, "╰⭐・vouches", ow_public_read)
+    # ================= FRANÇAIS =================
+    cat_info_fr = await make_category("📋・INFORMATION [FR]", lang_ow(r_fr, "read"))
+    ch_welcome_fr = await make_text(cat_info_fr, "├👋・bienvenue", lang_ow(r_fr, "read"))
+    ch_rules_fr = await make_text(cat_info_fr, "├📜・règlement", lang_ow(r_fr, "read"))
+    ch_vouch_fr = await make_text(cat_info_fr, "╰⭐・vouches-fr", lang_ow(r_fr, "read"))
 
-    # --- 💬 GÉNÉRAL ---
-    cat_gen = await make_category("💬・GÉNÉRAL", ow_public_talk)
-    await make_text(cat_gen, "├🗨️・discussion", ow_public_talk)
-    await make_text(cat_gen, "├📸・média", ow_public_talk)
-    await make_text(cat_gen, "╰🌐・réseaux", ow_public_read)
+    cat_gen_fr = await make_category("💬・GÉNÉRAL [FR]", lang_ow(r_fr, "talk"))
+    await make_text(cat_gen_fr, "├🗨️・discussion", lang_ow(r_fr, "talk"))
+    await make_text(cat_gen_fr, "├📸・média", lang_ow(r_fr, "talk"))
+    await make_text(cat_gen_fr, "╰🌐・réseaux", lang_ow(r_fr, "read"))
 
-    # --- 🎫 TICKET BOOST ---
-    cat_ticket = await make_category("🎫・TICKET BOOST", ow_tickets)
-    ch_price = await make_text(cat_ticket, "├💲・tarification", ow_tickets)
-    ch_open = await make_text(cat_ticket, "╰🎟️・créer-un-ticket", ow_tickets)
+    cat_ticket_fr = await make_category("🎫・TICKET BOOST [FR]", ticket_ow(r_fr))
+    ch_price_fr = await make_text(cat_ticket_fr, "├💲・tarification", ticket_ow(r_fr))
+    ch_open_fr = await make_text(cat_ticket_fr, "╰🎟️・créer-un-ticket", ticket_ow(r_fr))
 
-    # --- 🛠️ ADMIN ---
+    # ================= ENGLISH =================
+    cat_info_en = await make_category("📋・INFORMATION [EN]", lang_ow(r_en, "read"))
+    ch_welcome_en = await make_text(cat_info_en, "├👋・welcome", lang_ow(r_en, "read"))
+    ch_rules_en = await make_text(cat_info_en, "├📜・rules", lang_ow(r_en, "read"))
+    ch_vouch_en = await make_text(cat_info_en, "╰⭐・vouches-en", lang_ow(r_en, "read"))
+
+    cat_gen_en = await make_category("💬・GENERAL [EN]", lang_ow(r_en, "talk"))
+    await make_text(cat_gen_en, "├🗨️・chat", lang_ow(r_en, "talk"))
+    await make_text(cat_gen_en, "├📸・media", lang_ow(r_en, "talk"))
+    await make_text(cat_gen_en, "╰🌐・socials", lang_ow(r_en, "read"))
+
+    cat_ticket_en = await make_category("🎫・BOOST TICKETS [EN]", ticket_ow(r_en))
+    ch_price_en = await make_text(cat_ticket_en, "├💲・pricing", ticket_ow(r_en))
+    ch_open_en = await make_text(cat_ticket_en, "╰🎟️・open-a-ticket", ticket_ow(r_en))
+
+    # ================= ADMIN (français uniquement) =================
     cat_admin = await make_category("🛠️・ADMIN", ow_admin)
     ch_staff = await make_text(cat_admin, "├🔒・staff-chat", ow_admin)
     ch_logs = await make_text(cat_admin, "├📊・logs", ow_admin)
@@ -1009,37 +1130,38 @@ async def setup(interaction: discord.Interaction):
     #  5. SAUVEGARDE DE LA CONFIG
     # ------------------------------------------------------------------
     conf = guild_conf(guild.id)
-    conf.update(
-        {
-            "ticket_category": cat_ticket.id,
-            "log_channel": ch_logs.id,
-            "verify_channel": ch_verif.id,
-            "welcome_channel": ch_welcome.id,
-        }
-    )
+    conf.update({
+        "ticket_category_fr": cat_ticket_fr.id,
+        "ticket_category_en": cat_ticket_en.id,
+        "log_channel": ch_logs.id,
+        "verify_channel": ch_verif.id,
+    })
     save_data(DATA)
 
     # ------------------------------------------------------------------
     #  6. MESSAGES
     # ------------------------------------------------------------------
 
-    # --- Vérification ---
+    # --- Vérification (bilingue) ---
     e = discord.Embed(
-        title="🔐  VÉRIFICATION OBLIGATOIRE",
+        title="🔐  VÉRIFICATION  •  VERIFICATION",
         description=(
-            f"Bienvenue sur **{guild.name}**.\n\n"
-            "Ce serveur est protégé contre les raids. Pour accéder au reste des salons, "
-            "clique simplement sur le bouton ci-dessous.\n\n"
-            f"> ⏳ Ton compte Discord doit avoir au moins **{MIN_ACCOUNT_AGE_DAYS} jours**.\n"
-            "> 🛡️ En cas d'affluence anormale, la vérification est temporairement suspendue.\n"
-            "> ❓ Un souci ? Attends quelques minutes puis réessaie."
+            f"**🇫🇷 Bienvenue sur {guild.name}**\n"
+            "Choisis ta langue ci-dessous pour accéder au serveur. "
+            "Tu ne verras que les salons de la langue choisie.\n"
+            f"> ⏳ Ton compte doit avoir au moins **{MIN_ACCOUNT_AGE_DAYS} jours**.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"**🇬🇧 Welcome to {guild.name}**\n"
+            "Pick your language below to unlock the server. "
+            "You will only see the channels for the language you choose.\n"
+            f"> ⏳ Your account must be at least **{MIN_ACCOUNT_AGE_DAYS} days** old."
         ),
         colour=C_MEMBRE,
     )
-    e.set_footer(text="Système de protection automatique")
+    e.set_footer(text="Protection anti-raid active • Anti-raid protection enabled")
     await ch_verif.send(embed=e, view=VerifyView())
 
-    # --- Bienvenue ---
+    # --- Bienvenue FR ---
     e = discord.Embed(
         title=f"👋  Bienvenue sur {guild.name}",
         description=(
@@ -1050,170 +1172,183 @@ async def setup(interaction: discord.Interaction):
             "> 🔒 Discrétion totale sur chaque commande\n"
             "> ⭐ Des dizaines de vouches consultables publiquement\n\n"
             "**Pour démarrer :**\n"
-            f"> **1.** Lis le {ch_rules.mention}\n"
-            f"> **2.** Consulte les tarifs dans {ch_price.mention}\n"
-            f"> **3.** Ouvre un ticket dans {ch_open.mention}\n\n"
+            f"> **1.** Lis le {ch_rules_fr.mention}\n"
+            f"> **2.** Consulte les tarifs dans {ch_price_fr.mention}\n"
+            f"> **3.** Ouvre un ticket dans {ch_open_fr.mention}\n\n"
             "Bon boost. 🏆"
         ),
         colour=C_MEMBRE,
     )
     if guild.icon:
         e.set_thumbnail(url=guild.icon.url)
-    await ch_welcome.send(embed=e)
+    await ch_welcome_fr.send(embed=e)
 
-    # --- Règlement ---
+    # --- Welcome EN ---
+    e = discord.Embed(
+        title=f"👋  Welcome to {guild.name}",
+        description=(
+            "You've just joined the most straightforward **rank boosting server** around.\n\n"
+            "**What we do here:**\n"
+            "> 🚀 Rank boosting by verified players, account sharing or duo\n"
+            "> ⚡ Fast pickup, live updates inside your ticket\n"
+            "> 🔒 Full discretion on every order\n"
+            "> ⭐ Dozens of publicly available vouches\n\n"
+            "**Getting started:**\n"
+            f"> **1.** Read the {ch_rules_en.mention}\n"
+            f"> **2.** Check the rates in {ch_price_en.mention}\n"
+            f"> **3.** Open a ticket in {ch_open_en.mention}\n\n"
+            "Enjoy the climb. 🏆"
+        ),
+        colour=C_MEMBRE,
+    )
+    if guild.icon:
+        e.set_thumbnail(url=guild.icon.url)
+    await ch_welcome_en.send(embed=e)
+
+    # --- Règlement FR ---
     e = discord.Embed(
         title="📜  RÈGLEMENT DU SERVEUR",
         description="Le fait de rester sur le serveur vaut acceptation de ces règles.",
         colour=C_ADMIN,
     )
-    e.add_field(
-        name="1️⃣  Respect",
-        value="Aucune insulte, aucun propos discriminatoire, aucun harcèlement. Sanction immédiate.",
-        inline=False,
-    )
-    e.add_field(
-        name="2️⃣  Pas de spam",
-        value="Ni en salon, ni en MP. La pub pour d'autres services est bannissable.",
-        inline=False,
-    )
-    e.add_field(
-        name="3️⃣  Transactions en ticket uniquement",
-        value=(
-            "Toute commande passe par un ticket officiel. Un paiement effectué en dehors "
-            "d'un ticket **ne sera jamais couvert** par le staff."
-        ),
-        inline=False,
-    )
-    e.add_field(
-        name="4️⃣  Méfie-toi des usurpateurs",
-        value=(
-            "Le staff ne te contactera **jamais en premier** en MP pour te réclamer un paiement. "
-            "Vérifie systématiquement le rôle de ton interlocuteur."
-        ),
-        inline=False,
-    )
-    e.add_field(
-        name="5️⃣  Litiges",
-        value="Un désaccord se règle dans le ticket concerné, calmement, avec le staff. Pas en public.",
-        inline=False,
-    )
-    e.add_field(
-        name="6️⃣  CGU Discord",
-        value="Les [Conditions d'utilisation](https://discord.com/terms) s'appliquent. 13 ans minimum.",
-        inline=False,
-    )
-    e.set_footer(text="Le staff se réserve le droit de sanctionner tout comportement nuisible.")
-    await ch_rules.send(embed=e)
+    e.add_field(name="1️⃣  Respect", value="Aucune insulte, aucun propos discriminatoire, aucun harcèlement. Sanction immédiate.", inline=False)
+    e.add_field(name="2️⃣  Pas de spam", value="Ni en salon, ni en MP. La pub pour d'autres services est bannissable.", inline=False)
+    e.add_field(name="3️⃣  Transactions en ticket uniquement", value="Toute commande passe par un ticket officiel. Un paiement effectué en dehors d'un ticket **ne sera jamais couvert** par le staff.", inline=False)
+    e.add_field(name="4️⃣  Méfie-toi des usurpateurs", value="Le staff ne te contactera **jamais en premier** en MP pour te réclamer un paiement.", inline=False)
+    e.add_field(name="5️⃣  Litiges", value="Un désaccord se règle dans le ticket concerné, calmement, avec le staff. Pas en public.", inline=False)
+    e.add_field(name="6️⃣  CGU Discord", value="Les [Conditions d'utilisation](https://discord.com/terms) s'appliquent. 13 ans minimum.", inline=False)
+    await ch_rules_fr.send(embed=e)
 
-    # --- Vouches ---
+    # --- Rules EN ---
     e = discord.Embed(
+        title="📜  SERVER RULES",
+        description="Staying on this server means you accept these rules.",
+        colour=C_ADMIN,
+    )
+    e.add_field(name="1️⃣  Respect", value="No insults, no discriminatory language, no harassment. Immediate sanction.", inline=False)
+    e.add_field(name="2️⃣  No spam", value="Neither in channels nor in DMs. Advertising other services is a bannable offence.", inline=False)
+    e.add_field(name="3️⃣  Tickets only for transactions", value="Every order goes through an official ticket. Any payment made outside a ticket **will never be covered** by staff.", inline=False)
+    e.add_field(name="4️⃣  Beware of impersonators", value="Staff will **never DM you first** asking for a payment. Always check the person's role.", inline=False)
+    e.add_field(name="5️⃣  Disputes", value="Disagreements are settled inside the relevant ticket, calmly, with staff. Not in public.", inline=False)
+    e.add_field(name="6️⃣  Discord ToS", value="Discord's [Terms of Service](https://discord.com/terms) apply. 13+ only.", inline=False)
+    await ch_rules_en.send(embed=e)
+
+    # --- Vouches FR / EN ---
+    await ch_vouch_fr.send(embed=discord.Embed(
         title="⭐  VOUCHES & RETOURS CLIENTS",
         description=(
             "Ce salon regroupe les retours de nos clients.\n\n"
             "**Format attendu après une commande :**\n"
-            "```\n"
-            "Booster  : @pseudo\n"
-            "Service  : Boost Or 3 → Platine 2\n"
-            "Durée    : 2 jours\n"
-            "Note     : ⭐⭐⭐⭐⭐\n"
-            "Avis     : Rapide et propre, aucun souci.\n"
-            "```\n"
+            "```\nBooster  : @pseudo\nService  : Boost Or 3 → Platine 2\nDurée    : 2 jours\n"
+            "Note     : ⭐⭐⭐⭐⭐\nAvis     : Rapide et propre, aucun souci.\n```\n"
             "🚫 Tout faux vouch entraîne un bannissement définitif."
         ),
         colour=C_CLIENT,
-    )
-    await ch_vouches.send(embed=e)
-
-    # --- Tarification ---
-    e = discord.Embed(
-        title="💲  GRILLE TARIFAIRE",
+    ))
+    await ch_vouch_en.send(embed=discord.Embed(
+        title="⭐  VOUCHES & CUSTOMER FEEDBACK",
         description=(
-            "Tarifs indicatifs. Le prix exact dépend de ton rang de départ, du rang visé "
-            "et de ta région. Un devis précis t'est donné dans ton ticket.\n"
-            "*(Modifie ces valeurs selon tes propres tarifs.)*"
+            "This channel collects feedback from our customers.\n\n"
+            "**Expected format after an order:**\n"
+            "```\nBooster  : @username\nService  : Boost Gold 3 → Platinum 2\nDuration : 2 days\n"
+            "Rating   : ⭐⭐⭐⭐⭐\nReview   : Fast and clean, no issues.\n```\n"
+            "🚫 Any fake vouch results in a permanent ban."
         ),
         colour=C_CLIENT,
-    )
-    e.add_field(
-        name="🥉  Rangs bas",
-        value="`Fer → Bronze` **5€**\n`Bronze → Argent` **8€**\n`Argent → Or` **12€**",
-        inline=True,
-    )
-    e.add_field(
-        name="🥈  Rangs moyens",
-        value="`Or → Platine` **18€**\n`Platine → Diamant` **30€**\n`Diamant → Ascendant` **50€**",
-        inline=True,
-    )
-    e.add_field(
-        name="🥇  Haut elo",
-        value="`Ascendant → Immortel` **90€**\n`Immortel → Radiant` **sur devis**",
-        inline=True,
-    )
-    e.add_field(
-        name="➕  Options",
-        value=(
-            "> 🤝 **Duo boost** : +40 %\n"
-            "> ⚡ **Priorité express** : +20 %\n"
-            "> 📺 **Stream privé de la session** : +10 %\n"
-            "> 🎯 **Choix des agents / champions** : offert"
-        ),
-        inline=False,
-    )
-    e.add_field(
-        name="💳  Paiements acceptés",
-        value="PayPal (G&S) • Carte bancaire • Crypto • Virement",
-        inline=False,
-    )
-    e.set_footer(text="Aucun paiement en dehors d'un ticket officiel.")
-    await ch_price.send(embed=e)
+    ))
 
-    # --- Panneau de tickets ---
+    # --- Tarification FR ---
+    await ch_price_fr.send(embed=discord.Embed(
+        title="💲  GRILLE TARIFAIRE",
+        description=(
+            "Les tarifs dépendent de ton rang de départ, du rang visé et de ta région.\n"
+            "Un devis précis t'est donné dans ton ticket.\n\n"
+            "**À compléter par le staff.**\n\n"
+            "💳 **Paiements acceptés :** Crypto (BTC, ETH, USDT) • PayPal\n"
+            "⚠️ Aucun paiement en dehors d'un ticket officiel."
+        ),
+        colour=C_CLIENT,
+    ))
+
+    # --- Pricing EN ---
+    await ch_price_en.send(embed=discord.Embed(
+        title="💲  PRICING",
+        description=(
+            "Rates depend on your starting rank, target rank and region.\n"
+            "You'll get an exact quote inside your ticket.\n\n"
+            "**To be filled in by staff.**\n\n"
+            "💳 **Accepted payments:** Crypto (BTC, ETH, USDT) • PayPal\n"
+            "⚠️ No payment outside an official ticket."
+        ),
+        colour=C_CLIENT,
+    ))
+
+    # --- Panneau tickets FR ---
     e = discord.Embed(
         title="🎟️  OUVRIR UN TICKET",
         description=(
             "**C'est ici que tout commence.**\n\n"
-            "Que tu viennes acheter un boost, rejoindre l'équipe ou postuler au staff, "
-            "sélectionne simplement ton motif dans le menu ci-dessous. "
-            "Un salon privé sera créé instantanément entre toi et le staff.\n\n"
+            "Sélectionne ton motif dans le menu ci-dessous. Un salon privé sera créé "
+            "instantanément entre toi et le staff.\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "🚀 **Commander un boost**\n"
-            "> Tu veux monter de rang. Prépare ton rang actuel, le rang visé et ta région, "
-            "on te chiffre ça en quelques minutes.\n\n"
+            "> Prépare ton rang actuel, le rang visé et ta région.\n\n"
             "💪 **Devenir Booster**\n"
-            "> Tu es haut elo et tu veux monétiser ton niveau. Prépare tes preuves de rang "
-            "et tes disponibilités.\n\n"
+            "> Prépare tes preuves de rang et tes disponibilités.\n\n"
             "🛡️ **Candidature Staff**\n"
-            "> Tu veux nous aider à gérer la boutique et la communauté. Prépare ton expérience "
-            "et ta motivation.\n\n"
+            "> Prépare ton expérience et ta motivation.\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "> ⏱️ Réponse moyenne : **moins de 30 minutes** en journée\n"
             "> 🔒 Ton ticket est visible uniquement par toi et le staff\n"
-            "> ⚠️ Un seul ticket ouvert à la fois — les tickets vides sont supprimés"
+            "> ⚠️ Un seul ticket ouvert à la fois"
         ),
         colour=C_BOOSTER,
     )
     if guild.icon:
         e.set_thumbnail(url=guild.icon.url)
-    e.set_footer(text="Sélectionne un motif dans le menu déroulant ci-dessous ⬇️")
-    await ch_open.send(embed=e, view=TicketPanelView())
+    e.set_footer(text="Sélectionne un motif dans le menu ci-dessous ⬇️")
+    await ch_open_fr.send(embed=e, view=TicketPanelView())
+
+    # --- Ticket panel EN ---
+    e = discord.Embed(
+        title="🎟️  OPEN A TICKET",
+        description=(
+            "**This is where it all starts.**\n\n"
+            "Pick your reason from the menu below. A private channel will be created "
+            "instantly between you and the staff.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🚀 **Order a boost**\n"
+            "> Have your current rank, target rank and region ready.\n\n"
+            "💪 **Become a Booster**\n"
+            "> Have your rank proof and availability ready.\n\n"
+            "🛡️ **Staff Application**\n"
+            "> Have your experience and motivation ready.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "> 🔒 Your ticket is only visible to you and the staff\n"
+            "> ⚠️ One open ticket at a time"
+        ),
+        colour=C_BOOSTER,
+    )
+    if guild.icon:
+        e.set_thumbnail(url=guild.icon.url)
+    e.set_footer(text="Select a reason from the menu below ⬇️")
+    await ch_open_en.send(embed=e, view=TicketPanelViewEN())
 
     # --- Staff chat ---
-    await ch_staff.send(
-        embed=discord.Embed(
-            title="🔒  Salon staff",
-            description=(
-                "Coordination interne uniquement.\n\n"
-                "**Commandes utiles :**\n"
-                "`/setup` — reconstruit le serveur (idempotent)\n"
-                "`/panel` — renvoie le panneau de tickets dans le salon courant\n"
-                "`/verifypanel` — renvoie le panneau de vérification\n"
-                "`/lockdown` — active/désactive le mode protection manuellement\n"
-                "`/add @membre` — ajoute quelqu'un au ticket courant"
-            ),
-            colour=C_ADMIN,
-        )
-    )
+    await ch_staff.send(embed=discord.Embed(
+        title="🔒  Salon staff",
+        description=(
+            "Coordination interne uniquement.\n\n"
+            "**Commandes utiles :**\n"
+            "`/setup` — reconstruit le serveur (idempotent)\n"
+            "`/panel` — panneau de tickets FR • `/panel_en` — panneau EN\n"
+            "`/verifypanel` — panneau de vérification bilingue\n"
+            "`/langue` — change la langue d'un membre\n"
+            "`/request_payment` — demande de paiement crypto\n"
+            "`/lockdown` — mode protection anti-raid\n"
+            "`/add @membre` — ajoute quelqu'un au ticket courant"
+        ),
+        colour=C_ADMIN,
+    ))
 
     await interaction.followup.send(
         "✅ **Serveur construit.**\n\n"
@@ -1240,6 +1375,60 @@ async def panel(interaction: discord.Interaction):
     )
     await interaction.channel.send(embed=e, view=TicketPanelView())
     await interaction.response.send_message("✅ Panneau envoyé.", ephemeral=True)
+
+
+@bot.tree.command(name="panel_en", description="Sends the English ticket panel here.")
+@app_commands.checks.has_permissions(administrator=True)
+async def panel_en(interaction: discord.Interaction):
+    e = discord.Embed(
+        title="🎟️  OPEN A TICKET",
+        description="Pick your reason from the menu below to open a private channel with the staff.",
+        colour=C_BOOSTER,
+    )
+    await interaction.channel.send(embed=e, view=TicketPanelViewEN())
+    await interaction.response.send_message("✅ Panel sent.", ephemeral=True)
+
+
+@bot.tree.command(name="langue", description="Change la langue d'un membre (FR / EN).")
+@app_commands.describe(membre="Le membre concerné", langue="Nouvelle langue")
+@app_commands.choices(langue=[
+    app_commands.Choice(name="🇫🇷 Français", value="fr"),
+    app_commands.Choice(name="🇬🇧 English", value="en"),
+])
+async def langue(
+    interaction: discord.Interaction,
+    langue: app_commands.Choice[str],
+    membre: discord.Member = None,
+):
+    target = membre or interaction.user
+    role_admin = get_role(interaction.guild, R_ADMIN)
+    is_staff = role_admin and role_admin in interaction.user.roles
+
+    if membre and membre != interaction.user and not is_staff:
+        return await interaction.response.send_message(
+            "⛔ Seul le staff peut changer la langue d'un autre membre.", ephemeral=True
+        )
+
+    r_new = get_role(interaction.guild, R_FR if langue.value == "fr" else R_EN)
+    r_old = get_role(interaction.guild, R_EN if langue.value == "fr" else R_FR)
+
+    if r_new is None:
+        return await interaction.response.send_message(
+            "⚠️ Rôles de langue introuvables. Relance `/setup`.", ephemeral=True
+        )
+
+    try:
+        await target.add_roles(r_new, reason="Changement de langue")
+        if r_old and r_old in target.roles:
+            await target.remove_roles(r_old, reason="Changement de langue")
+    except discord.Forbidden:
+        return await interaction.response.send_message(
+            "⚠️ Permissions insuffisantes.", ephemeral=True
+        )
+
+    await interaction.response.send_message(
+        f"✅ Langue de {target.mention} → **{langue.name}**", ephemeral=True
+    )
 
 
 @bot.tree.command(name="verifypanel", description="Renvoie le panneau de vérification ici.")
