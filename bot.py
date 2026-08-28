@@ -13,7 +13,9 @@ import json
 import time
 import asyncio
 import datetime
+import threading
 from collections import deque
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import discord
 from discord.ext import commands
@@ -975,7 +977,44 @@ async def on_app_command_error(interaction: discord.Interaction, error):
 
 # ======================================================================
 
+#  SERVEUR HTTP KEEPALIVE (obligatoire pour le plan gratuit Render)
+# ======================================================================
+#  Render exige qu'un Web Service écoute sur un port, sinon il tue le
+#  service. Ce mini serveur répond simplement "OK" et sert de cible au
+#  pinger externe (UptimeRobot) qui empêche la mise en veille.
+# ======================================================================
+
+
+class KeepAliveHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        status = "en ligne" if bot.is_ready() else "démarrage"
+        body = f"Bot Discord : {status}".encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+
+    def log_message(self, *args):
+        pass  # On évite de polluer les logs Render avec chaque ping
+
+
+def start_keepalive():
+    port = int(os.getenv("PORT", "10000"))
+    server = HTTPServer(("0.0.0.0", port), KeepAliveHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    print(f"→ Serveur keepalive démarré sur le port {port}")
+
+
+# ======================================================================
+
 if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("❌ La variable d'environnement DISCORD_TOKEN est manquante.")
+    start_keepalive()
     bot.run(TOKEN)
