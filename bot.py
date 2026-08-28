@@ -1258,30 +1258,144 @@ async def setup(interaction: discord.Interaction):
     ))
 
     # --- Tarification FR ---
-    await ch_price_fr.send(embed=discord.Embed(
+    e = discord.Embed(
         title="💲  GRILLE TARIFAIRE",
         description=(
-            "Les tarifs dépendent de ton rang de départ, du rang visé et de ta région.\n"
-            "Un devis précis t'est donné dans ton ticket.\n\n"
-            "**À compléter par le staff.**\n\n"
-            "💳 **Paiements acceptés :** Crypto (BTC, ETH, USDT) • PayPal\n"
-            "⚠️ Aucun paiement en dehors d'un ticket officiel."
+            "Les tarifs sont calculés en fonction du **nombre de RR** à parcourir "
+            "entre ton rang actuel et ton objectif.\n"
+            "Un devis exact t'est donné dans ton ticket, options comprises.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         ),
         colour=C_CLIENT,
-    ))
+    )
+    e.add_field(
+        name="🥉  Fer • Bronze • Argent",
+        value=(
+            ":valorantiron1: → :valorantsilver3:\n"
+            "```\n"
+            "Fer 1    → Bronze 3    ...\n"
+            "Bronze 1 → Argent 3    ...\n"
+            "Argent 1 → Or 1        ...\n"
+            "```"
+        ),
+        inline=False,
+    )
+    e.add_field(
+        name="🥈  Or • Platine • Diamant",
+        value=(
+            ":valorantgold1: → :valorantdiamond3:\n"
+            "```\n"
+            "Or 1      → Platine 1   ...\n"
+            "Platine 1 → Diamant 1   ...\n"
+            "Diamant 1 → Ascendant 1 ...\n"
+            "```"
+        ),
+        inline=False,
+    )
+    e.add_field(
+        name="🥇  Ascendant • Immortel • Radiant",
+        value=(
+            ":valorantascendant1: → :valorantradiant:\n"
+            "```\n"
+            "Ascendant 1 → Immortel 1  ...\n"
+            "Immortel 1  → Immortel 3  ...\n"
+            "Immortel 3  → Radiant     sur devis\n"
+            "```"
+        ),
+        inline=False,
+    )
+    e.add_field(
+        name="➕  Options",
+        value=(
+            "> 🤝 **Duo boost** — +40 %\n"
+            "> ⚡ **Priorité express** — +20 %\n"
+            "> 📺 **Stream privé de la session** — +10 %\n"
+            "> 🎯 **Choix des agents** — offert"
+        ),
+        inline=False,
+    )
+    e.add_field(
+        name="💳  Paiements acceptés",
+        value=(
+            "> <:paypal:0> **PayPal** — Amis & Famille uniquement\n"
+            "> ₿ **Bitcoin** (BTC)\n"
+            "> ⟠ **Ethereum** (ETH)\n"
+            "> ₮ **USDT** — réseau ERC-20 uniquement"
+        ),
+        inline=False,
+    )
+    e.set_footer(text="Aucun paiement en dehors d'un ticket officiel • Prix indicatifs")
+    await ch_price_fr.send(embed=e)
 
     # --- Pricing EN ---
-    await ch_price_en.send(embed=discord.Embed(
+    e = discord.Embed(
         title="💲  PRICING",
         description=(
-            "Rates depend on your starting rank, target rank and region.\n"
-            "You'll get an exact quote inside your ticket.\n\n"
-            "**To be filled in by staff.**\n\n"
-            "💳 **Accepted payments:** Crypto (BTC, ETH, USDT) • PayPal\n"
-            "⚠️ No payment outside an official ticket."
+            "Prices are based on the **amount of RR** between your current rank "
+            "and your target.\n"
+            "You'll get an exact quote inside your ticket, options included.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         ),
         colour=C_CLIENT,
-    ))
+    )
+    e.add_field(
+        name="🥉  Iron • Bronze • Silver",
+        value=(
+            ":valorantiron1: → :valorantsilver3:\n"
+            "```\n"
+            "Iron 1   → Bronze 3   ...\n"
+            "Bronze 1 → Silver 3   ...\n"
+            "Silver 1 → Gold 1     ...\n"
+            "```"
+        ),
+        inline=False,
+    )
+    e.add_field(
+        name="🥈  Gold • Platinum • Diamond",
+        value=(
+            ":valorantgold1: → :valorantdiamond3:\n"
+            "```\n"
+            "Gold 1     → Platinum 1  ...\n"
+            "Platinum 1 → Diamond 1   ...\n"
+            "Diamond 1  → Ascendant 1 ...\n"
+            "```"
+        ),
+        inline=False,
+    )
+    e.add_field(
+        name="🥇  Ascendant • Immortal • Radiant",
+        value=(
+            ":valorantascendant1: → :valorantradiant:\n"
+            "```\n"
+            "Ascendant 1 → Immortal 1  ...\n"
+            "Immortal 1  → Immortal 3  ...\n"
+            "Immortal 3  → Radiant     on request\n"
+            "```"
+        ),
+        inline=False,
+    )
+    e.add_field(
+        name="➕  Options",
+        value=(
+            "> 🤝 **Duo boost** — +40 %\n"
+            "> ⚡ **Express priority** — +20 %\n"
+            "> 📺 **Private stream of the session** — +10 %\n"
+            "> 🎯 **Agent selection** — free"
+        ),
+        inline=False,
+    )
+    e.add_field(
+        name="💳  Accepted payments",
+        value=(
+            "> **PayPal** — Friends & Family only\n"
+            "> ₿ **Bitcoin** (BTC)\n"
+            "> ⟠ **Ethereum** (ETH)\n"
+            "> ₮ **USDT** — ERC-20 network only"
+        ),
+        inline=False,
+    )
+    e.set_footer(text="No payment outside an official ticket • Indicative prices")
+    await ch_price_en.send(embed=e)
 
     # --- Panneau tickets FR ---
     e = discord.Embed(
