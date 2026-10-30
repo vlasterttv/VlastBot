@@ -37,8 +37,9 @@ except ImportError:
 # ===================== CONFIG =====================
 load_dotenv()
 
-TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-GUILD_ID = os.getenv("DISCORD_GUILD_ID")
+# Accepte les deux noms de variable pour éviter les erreurs de configuration.
+TOKEN = (os.getenv("DISCORD_BOT_TOKEN") or os.getenv("DISCORD_TOKEN") or "").strip()
+GUILD_ID = (os.getenv("DISCORD_GUILD_ID") or os.getenv("GUILD_ID") or "").strip() or None
 DB_PATH = os.getenv("PP_DB_PATH", "pp_bot.sqlite3")
 
 VERIFY_CHANNEL_NAME = os.getenv("VERIFY_CHANNEL_NAME", "verification")
@@ -3601,9 +3602,25 @@ def start_health_server() -> ThreadingHTTPServer:
 
 # ===================== RUN =====================
 def main() -> None:
-    if not TOKEN:
-        raise RuntimeError("DISCORD_BOT_TOKEN manquant dans le .env")
+    # Le serveur HTTP démarre en premier : Render détecte le port même si
+    # la configuration est incomplète, au lieu de boucler sur "No open ports".
     start_health_server()
+
+    if not TOKEN:
+        presentes = sorted(
+            k for k in os.environ
+            if any(mot in k.upper() for mot in ("DISCORD", "TOKEN", "HENRIK", "GUILD"))
+        )
+        raise RuntimeError(
+            "Token introuvable. Aucune des variables DISCORD_BOT_TOKEN / DISCORD_TOKEN "
+            f"n'est définie.\nVariables détectées dans l'environnement : {presentes or 'aucune'}"
+        )
+
+    if not GUILD_ID:
+        print("[CONFIG] DISCORD_GUILD_ID absent : synchronisation globale (jusqu'à 1h de délai).")
+    if not HENRIK_API_KEY:
+        print("[CONFIG] HENRIK_API_KEY absente : le tracker RR restera désactivé.")
+
     try:
         bot.run(TOKEN)
     finally:
